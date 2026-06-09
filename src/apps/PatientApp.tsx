@@ -50,6 +50,12 @@ export default function PatientApp({ onBack }: { onBack: () => void }) {
   const [notificationsAllowed, setNotificationsAllowed] = useState(false);
   const [dailySeq, setDailySeq] = useState<number>(1);
 
+  // States for queue preview
+  const [previewDoc, setPreviewDoc] = useState<any>(null);
+  const [previewQueue, setPreviewQueue] = useState<any[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [isEnteringQueue, setIsEnteringQueue] = useState(false);
+
   // Form states to pre-populate and make editable
   const [formName, setFormName] = useState('');
   const [formAge, setFormAge] = useState('');
@@ -97,13 +103,72 @@ export default function PatientApp({ onBack }: { onBack: () => void }) {
   };
 
   const loadDocs = async (specId: string) => {
-    const { data } = await supabase.from('doctors').select('*').eq('spec_id', specId).eq('active', true).eq('hospital_id', selHospital.id);
-    setDocs(data || []);
+    // 1. Fetch doctors of given spec active in selected hospital
+    const { data: doctorsData } = await supabase
+      .from('doctors')
+      .select('*')
+      .eq('spec_id', specId)
+      .eq('active', true)
+      .eq('hospital_id', selHospital.id);
+
+    if (doctorsData && doctorsData.length > 0) {
+      const docIds = doctorsData.map(d => d.id);
+      
+      // 2. Fetch all active waiting or calling queue items to show current queues length
+      const { data: queueCounts } = await supabase
+        .from('queue')
+        .select('doc_id')
+        .in('doc_id', docIds)
+        .in('status', ['waiting', 'calling']);
+
+      const doctorsWithCounts = doctorsData.map(d => {
+        const count = queueCounts ? queueCounts.filter(q => q.doc_id === d.id).length : 0;
+        return { ...d, queueCount: count };
+      });
+
+      setDocs(doctorsWithCounts);
+    } else {
+      setDocs([]);
+    }
     setStep(4);
+  };
+
+  const openQueuePreview = async (doc: any) => {
+    setSelDoc(doc);
+    setPreviewDoc(doc);
+    setLoadingPreview(true);
+
+    // Fetch detailed active queue list for this doctor
+    const { data } = await supabase
+      .from('queue')
+      .select('id, name, kind, status, priority, age, created_at')
+      .eq('doc_id', doc.id)
+      .in('status', ['waiting', 'calling'])
+      .order('level', { ascending: true })
+      .order('created_at', { ascending: true });
+
+    setPreviewQueue(data || []);
+    setLoadingPreview(false);
+  };
+
+  const closeQueuePreview = () => {
+    setPreviewDoc(null);
+    setPreviewQueue([]);
+  };
+
+  const formatWaitTime = (createdAtStr: string) => {
+    const diffSecs = Math.max(0, Math.floor((Date.now() - new Date(createdAtStr).getTime()) / 1000));
+    const mins = Math.floor(diffSecs / 60);
+    if (mins < 1) return 'Agora mesmo';
+    if (mins < 60) return `${mins} min`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+    return 'Mais de 1 dia';
   };
 
   const enterQueue = async () => {
     if (!patient || !selDoc) return;
+    setIsEnteringQueue(true);
     const { data, error } = await supabase.from('queue').insert({
       doc_id: selDoc.id,
       hospital_id: selHospital.id,
@@ -116,8 +181,11 @@ export default function PatientApp({ onBack }: { onBack: () => void }) {
       status: 'waiting'
     }).select().single();
 
+    setIsEnteringQueue(false);
     if (!error && data) {
       setQueueItem(data);
+      setPreviewDoc(null);
+      setPreviewQueue([]);
       setStep(5);
     }
   };
@@ -324,24 +392,221 @@ export default function PatientApp({ onBack }: { onBack: () => void }) {
 
   // STEP 4: DOCTOR SELECTION
   if (step === 4) {
+    if (previewDoc) {
+      // Show immersive live queue preview screen!
+      const triageCount = previewQueue.filter(q => q.status === 'waiting' && q.kind === 'T').length;
+      const normalCount = previewQueue.filter(q => q.status === 'waiting' && q.kind === 'N').length;
+      const urgentCount = previewQueue.filter(q => q.status === 'waiting' && q.kind === 'U').length;
+      const emergencyCount = previewQueue.filter(q => q.status === 'waiting' && q.kind === 'E').length;
+      const callingCount = previewQueue.filter(q => q.status === 'calling').length;
+      
+      const totalInQueue = previewQueue.length;
+      // Wait time calculation: ~12 mins for urgent/emergency/normal, ~5 mins for unclassified triage, and ~10 mins for calling
+      const estimatedWaitTime = (normalCount + urgentCount + emergencyCount) * 12 + triageCount * 5 + callingCount * 10;
+
+      return (
+        <div className="min-h-screen bg-[#07101f] text-slate-100 p-6 flex flex-col items-center">
+          <div className="w-full max-w-md animate-in fade-in slide-in-from-bottom-3 duration-200">
+            <div className="flex items-center mb-6 gap-3">
+              <button onClick={() => closeQueuePreview()} className="p-2 rounded-full border border-white/10 cursor-pointer hover:bg-white/5 transition-colors">
+                <ArrowLeft size={18} />
+              </button>
+              <div>
+                <h2 className="text-xl font-bold text-white">Pré-visualização da Fila</h2>
+                <p className="text-xs text-slate-400 font-medium">Verifique o status antes de se credenciar</p>
+              </div>
+            </div>
+
+            {/* Doctor Info Card */}
+            <div className="bg-[#0d1e35] p-5 rounded-2xl border border-teal-500/20 mb-5 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-teal-500/5 rounded-full blur-xl pointer-events-none" />
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-bold text-white text-lg">Dr(a). {previewDoc.name}</h3>
+                  <p className="text-xs text-teal-400 font-mono mt-0.5">CRM: {previewDoc.crm}</p>
+                  <p className="text-xs text-slate-400 mt-3 flex items-center gap-1.5">
+                    <Building size={13} className="text-slate-400 shrink-0" /> {selHospital.name}
+                  </p>
+                </div>
+                <div className="bg-teal-500/10 text-teal-400 p-2 rounded-xl text-center border border-teal-500/20">
+                  <div className="font-extrabold text-xl leading-none">{totalInQueue}</div>
+                  <div className="text-[8px] uppercase tracking-wider font-bold mt-1">Na Fila</div>
+                </div>
+              </div>
+
+              {/* Waiting metrics */}
+              <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-white/5">
+                <div className="bg-slate-900/40 p-3 rounded-xl border border-white/5 flex flex-col justify-center">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Tempo Estimado</span>
+                  <span className="text-lg font-bold text-amber-400 mt-0.5">
+                    {totalInQueue === 0 ? 'Imediato' : `~${estimatedWaitTime} min`}
+                  </span>
+                </div>
+                <div className="bg-slate-900/40 p-3 rounded-xl border border-white/5 flex flex-col justify-center">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Status Atual</span>
+                  <span className="text-xs font-semibold text-emerald-400 mt-0.5 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Atendimento Ativo
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Queue breakdown */}
+            <div className="mb-6">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Composição da Fila</h4>
+              <div className="grid grid-cols-4 gap-2">
+                <div className="bg-[#0b1624] p-2.5 rounded-xl border border-red-500/10 text-center">
+                  <div className="font-black text-red-500 text-sm">{emergencyCount}</div>
+                  <div className="text-[8px] uppercase font-bold text-slate-400">Emerg.</div>
+                </div>
+                <div className="bg-[#0b1624] p-2.5 rounded-xl border border-amber-500/10 text-center">
+                  <div className="font-black text-amber-500 text-sm">{urgentCount}</div>
+                  <div className="text-[8px] uppercase font-bold text-slate-400">Urgente</div>
+                </div>
+                <div className="bg-[#0b1624] p-2.5 rounded-xl border border-emerald-500/10 text-center">
+                  <div className="font-black text-emerald-500 text-sm">{normalCount}</div>
+                  <div className="text-[8px] uppercase font-bold text-slate-400">Normal</div>
+                </div>
+                <div className="bg-[#0b1624] p-2.5 rounded-xl border border-slate-500/10 text-center">
+                  <div className="font-black text-slate-300 text-sm">{triageCount}</div>
+                  <div className="text-[8px] uppercase font-bold text-slate-400">Triagem</div>
+                </div>
+              </div>
+            </div>
+
+            {/* List of patients waiting */}
+            <div className="mb-6">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Linha de Espera Atual</h4>
+              {loadingPreview ? (
+                <div className="p-8 text-center bg-[#0d1e35] rounded-2xl border border-white/5 animate-pulse text-slate-400 text-sm flex flex-col items-center gap-2">
+                  <div className="w-5 h-5 rounded-full border-2 border-teal-500 border-t-transparent animate-spin" />
+                  Carregando fila em tempo real...
+                </div>
+              ) : previewQueue.length === 0 ? (
+                <div className="p-8 text-center bg-[#0d1e35] rounded-2xl border border-white/5 text-slate-400 text-sm">
+                  🩺 Fila vazia! Entre agora para ser o próximo atendimento.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
+                  {previewQueue.map((item, index) => {
+                    const isCalling = item.status === 'calling';
+                    // Secure name masking according to LGPD rules
+                    const parts = item.name.trim().split(/\s+/);
+                    const formattedName = parts[0] + ' ' + (parts.length > 1 ? parts[parts.length - 1][0] + '.' : '');
+                    
+                    return (
+                      <div 
+                        key={item.id} 
+                        className={`p-3 rounded-xl border flex justify-between items-center bg-[#0d1e35]/60 transition-colors ${
+                          isCalling ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-white/5'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-mono font-bold text-slate-400 bg-white/5 w-6 h-6 rounded-full flex items-center justify-center border border-white/10 shrink-0">
+                            {index + 1}º
+                          </span>
+                          <div>
+                            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                              {formattedName}
+                              <span className="text-[10px] font-normal text-slate-400">({item.age} anos)</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                              {isCalling ? (
+                                <span className="text-emerald-400 font-bold uppercase tracking-wider text-[8px] flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" /> Chamando no consultório
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">Espera: {formatWaitTime(item.created_at)}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 ml-2">
+                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border ${
+                            item.kind === 'E' ? 'bg-red-500/15 text-red-400 border-red-500/20' :
+                            item.kind === 'U' ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' :
+                            item.kind === 'N' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' :
+                            'bg-slate-500/15 text-slate-300 border-white/5'
+                          }`}>
+                            {item.kind === 'T' ? 'Ficha Inicial' : item.priority}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Instruction warning cards */}
+            <div className="bg-slate-900/50 border border-teal-500/10 p-4 rounded-xl text-xs text-slate-400 flex gap-2.5 items-start mb-6">
+              <span className="text-base shrink-0 leading-none">ℹ️</span>
+              <p className="leading-relaxed">
+                Ao entrar na fila, seu ticket iniciará como <span className="text-slate-200">Aguardando Triagem (T)</span>. A triagem clínica inicial definirá sua prioridade no atendimento final.
+              </p>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-col gap-2">
+              <button 
+                onClick={() => enterQueue()} 
+                disabled={isEnteringQueue}
+                className="w-full py-4 bg-teal-500 hover:bg-teal-400 text-slate-900 font-extrabold rounded-xl cursor-pointer shadow-lg shadow-teal-500/15 transition-all text-sm flex items-center justify-center gap-2"
+              >
+                {isEnteringQueue ? (
+                  <>
+                    <div className="w-4 h-4 rounded-full border-2 border-slate-900 border-t-transparent animate-spin" />
+                    Gerando sua ficha...
+                  </>
+                ) : (
+                  <>Confirmar Entrada na Fila</>
+                )}
+              </button>
+              <button 
+                onClick={() => closeQueuePreview()} 
+                disabled={isEnteringQueue}
+                className="w-full py-3 bg-transparent border border-white/10 text-slate-400 hover:text-slate-300 font-bold rounded-xl hover:bg-white/5 transition-colors cursor-pointer text-xs"
+              >
+                Voltar e Escolher Outro Médico
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#07101f] text-slate-100 p-6 flex flex-col items-center">
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-md animate-in fade-in duration-200">
            <div className="flex items-center mb-6 gap-3">
-            <button onClick={() => setStep(3)} className="p-2 rounded-full border border-white/10 cursor-pointer"><ArrowLeft size={20} /></button>
-            <h2 className="text-xl font-bold text-white">Selecione o Médico</h2>
+            <button onClick={() => setStep(3)} className="p-2 rounded-full border border-white/10 cursor-pointer hover:bg-white/5 transition-colors"><ArrowLeft size={18} /></button>
+            <div>
+              <h2 className="text-xl font-bold text-white">Selecione o Médico</h2>
+              <p className="text-xs text-slate-400 font-medium">Toque para ver a fila em tempo real</p>
+            </div>
           </div>
           
           <div className="flex flex-col gap-3">
             {docs.length === 0 ? (
               <div className="text-center p-8 bg-[#0d1e35] rounded-xl text-slate-400">Nenhum médico disponível nesta especialidade.</div>
             ) : docs.map(d => (
-              <button key={d.id} onClick={() => { setSelDoc(d); enterQueue(); }} className="bg-[#0d1e35] p-4 rounded-xl border border-teal-500/20 text-left flex justify-between items-center hover:bg-[#122540] transition-colors cursor-pointer">
-                <div>
-                  <div className="font-bold text-white">{d.name}</div>
-                  <div className="text-sm text-slate-400 uppercase tracking-wider">{d.crm}</div>
+              <button key={d.id} onClick={() => openQueuePreview(d)} className="bg-[#0d1e35] p-5 rounded-2xl border border-teal-500/20 text-left flex justify-between items-center hover:bg-[#122540] hover:border-teal-400/40 transition-all cursor-pointer transform hover:-translate-y-0.5 shadow-md">
+                <div className="flex-1">
+                  <div className="font-bold text-white text-[15px]">{d.name}</div>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider mt-1">{d.crm}</div>
+                  
+                  {/* Queue count indicator */}
+                  <div className="mt-3 flex items-center gap-2 bg-slate-950/40 border border-white/5 rounded-xl px-2.5 py-1.5 max-w-fit">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                    <span className="text-[11px] text-slate-300 font-medium">
+                      Fila atual: <strong className="text-teal-400 font-extrabold">{d.queueCount ?? 0}</strong> {d.queueCount === 1 ? 'paciente' : 'pacientes'}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-teal-400 text-sm font-bold">Selecionar →</div>
+                <div className="bg-teal-500/10 text-teal-400 px-3 py-2 rounded-xl text-[11px] font-bold uppercase tracking-wider hover:bg-teal-500/15 shrink-0 ml-3 border border-teal-500/10">
+                  Ver Fila →
+                </div>
               </button>
             ))}
           </div>
