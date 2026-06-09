@@ -25,7 +25,7 @@ export default function Landing({ onSelectRole }: Props) {
 
       {showQr && (
         <div className="bg-white p-4 rounded-2xl mb-8 animate-in fade-in slide-in-from-bottom-4">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=https://wellingtonmaiconmelosan-debug.github.io/Filafacil-test/" alt="QR Code" className="w-32 h-32 rounded-lg" />
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=https://wellingtonmaiconmelosan-debug.github.io/FilaFacil_Oficial.UCSAL/" alt="QR Code" className="w-32 h-32 rounded-lg" />
           <div className="text-slate-900 text-xs font-bold mt-3 tracking-widest">ACESSE O APP</div>
         </div>
       )}
