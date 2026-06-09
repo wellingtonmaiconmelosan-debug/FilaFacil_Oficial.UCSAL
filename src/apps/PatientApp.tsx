@@ -243,6 +243,10 @@ export default function PatientApp({ onBack }: { onBack: () => void }) {
     
     const me = data.find(x => x.id === queueItem.id);
     if (!me) {
+      const { data: latestItem } = await supabase.from('queue').select('*').eq('id', queueItem.id).maybeSingle();
+      if (latestItem) {
+        setQueueItem(latestItem);
+      }
       setQueueStatus({ done: true });
       return;
     }
@@ -658,7 +662,49 @@ export default function PatientApp({ onBack }: { onBack: () => void }) {
           {!queueStatus ? (
              <div className="animate-pulse text-slate-400">Carregando sua posição...</div>
           ) : isDone ? (
-            <div className="text-emerald-400 font-bold bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20">✅ Atendimento Concluído!</div>
+            <div className="text-left animate-in fade-in duration-300">
+              <div className="text-emerald-400 font-bold bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center gap-2 mb-4">
+                <span className="text-lg">✅</span>
+                <span>Atendimento Concluído com Sucesso!</span>
+              </div>
+              
+              <div className="bg-[#07101f] rounded-2xl border border-teal-500/20 p-5 mt-4 relative overflow-hidden shadow-inner">
+                {/* Clinical grid backing accent */}
+                <div className="absolute inset-0 opacity-[0.02] pointer-events-none bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px]" />
+                
+                <div className="flex items-center gap-2 pb-3 mb-3 border-b border-white/5">
+                  <span className="text-xl">📄</span>
+                  <div>
+                    <h4 className="font-extrabold text-[#2dd4bf] text-xs uppercase tracking-widest">Receita & Observações</h4>
+                    <p className="text-[10px] text-slate-400 font-mono">Emissão Digital · FilaFácil</p>
+                  </div>
+                </div>
+
+                {queueItem.obs ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-300 leading-relaxed font-sans whitespace-pre-wrap italic bg-teal-500/5 p-3 rounded-lg border border-teal-500/10">
+                      "{queueItem.obs}"
+                    </p>
+                    <div className="bg-emerald-500/5 rounded-xl p-3 border border-emerald-500/10 flex items-start gap-2 text-xs text-slate-300">
+                      <span className="text-sm">💡</span>
+                      <p className="leading-relaxed">
+                        Siga corretamente as indicações médicas acima. Caso possua dúvidas ou sinta sintomas graves, procure a recepção do hospital.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-slate-400 text-xs italic p-3 text-center">
+                    Nenhuma recomendação ou medicamento específico foi registrado pelo médico nesta consulta.
+                  </div>
+                )}
+                
+                <div className="mt-5 pt-3 border-t border-white/5 flex flex-col items-center justify-center text-center">
+                  <div className="w-12 h-px bg-slate-700 mb-2" />
+                  <span className="text-[11px] font-bold text-slate-300">Dr(a). {selDoc?.name || 'Profissional da Saúde'}</span>
+                  <span className="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">Assinatura Digital Cadastrada</span>
+                </div>
+              </div>
+            </div>
           ) : isCalling ? (
             <div className="text-emerald-400 font-bold bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 flex items-center justify-center gap-3 animate-bounce">
               <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />

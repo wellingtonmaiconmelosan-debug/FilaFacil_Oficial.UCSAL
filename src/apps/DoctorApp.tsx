@@ -233,7 +233,7 @@ export default function DoctorApp({ onBack }: { onBack: () => void }) {
                    <textarea
                      value={obs}
                      onChange={(e) => setObs(e.target.value)}
-                     placeholder="Adicionar observações do prontuário (Opcional)..."
+                     placeholder="Adicionar observações, receitas ou medicamentos (o paciente receberá essa indicação no celular em tempo real)..."
                      className="w-full h-24 p-3 rounded-xl bg-[#07101f] border border-white/10 text-white outline-none focus:border-teal-400 mb-4 text-sm"
                    />
                    <button onClick={finish} className="w-full p-4 bg-red-500 text-white font-bold rounded-xl hover:bg-red-400 transition-colors shadow-[0_4px_15px_rgba(239,68,68,0.3)] flex items-center justify-center gap-2">
