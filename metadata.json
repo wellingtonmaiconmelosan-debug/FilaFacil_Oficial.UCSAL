@@ -1,0 +1,6 @@
+{
+  "name": "FilaFácil - Gestão de Filas",
+  "description": "Sistema inteligente de otimização de tempo e rastreabilidade posicional de fluxos hospitalares em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

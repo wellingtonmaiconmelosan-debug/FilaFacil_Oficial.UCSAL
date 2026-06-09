@@ -1,0 +1,53 @@
+# Workflow para compilar e implantar o aplicativo Vite no GitHub Pages de forma 100% automatizada
+name: Implantar no GitHub Pages
+
+on:
+  push:
+    branches: ["main", "master"] # Executa no push para main ou master
+
+  # Permite executar manualmente pela aba Actions do GitHub
+  workflow_dispatch:
+
+# Permissões necessárias para publicar no GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+  x    name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código Fonte
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar Dependências
+        run: npm ci || npm install
+
+      - name: Compilar Projeto (Build)
+        run: npm run build
+
+      - name: Configurar Pages
+        uses: actions/configure-pages@v4
+
+      - name: Enviar Artefato do Build
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
